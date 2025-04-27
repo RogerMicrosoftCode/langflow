@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langflow
+  labels:
+    app: langflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langflow
+  template:
+    metadata:
+      labels:
+        app: langflow
+    spec:
+      # OpenShift requiere políticas de seguridad estrictas
+      securityContext:
+        fsGroup: 1000770000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: init-permissions
+        image: registry.access.redhat.com/ubi8/ubi-minimal:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsUser: 1000770000
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Configurando permisos para los directorios..."
+          # Crear subdirectorios necesarios
+          mkdir -p /mnt/langflow/alembic
+          mkdir -p /mnt/langflow/cache
+          mkdir -p /mnt/langflow/data
+          # Crear archivos de log
+          touch /mnt/langflow/alembic/alembic.log
+          # Asignar permisos
+          chmod -R 775 /mnt/langflow
+          echo "Listado de directorios creados:"
+          ls -la /mnt/langflow
+          ls -la /mnt/langflow/alembic
+        volumeMounts:
+        - name: langflow-data
+          mountPath: /mnt/langflow
+        - name: langflow-mount-dir
+          mountPath: /mnt
+      containers:
+      - name: langflow
+        image: langflowai/langflow:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsUser: 1000770000
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        ports:
+        - containerPort: 7860
+        env:
+        - name: LANGFLOW_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-azure-secret
+              key: LANGFLOW_DATABASE_URL
+        - name: LANGFLOW_CONFIG_DIR
+          value: "/app/langflow"
+        - name: LANGFLOW_PORT
+          value: "7860"
+        - name: LANGFLOW_ALEMBIC_LOG
+          value: "/mnt/langflow/alembic/alembic.log"
+        # Redirigir el directorio cache al volumen con permisos
+        - name: XDG_CACHE_HOME
+          value: "/mnt/langflow/cache"
+        # HOME necesario para escritura en algunos directorios
+        - name: HOME
+          value: "/mnt/langflow"
+        volumeMounts:
+        - name: langflow-data
+          mountPath: "/app/langflow"
+        - name: langflow-data
+          mountPath: "/app/.venv/lib/python3.12/site-packages/langflow/alembic"
+          subPath: "alembic"
+        - name: langflow-data
+          mountPath: "/.cache"
+          subPath: "cache"
+        - name: langflow-mount-dir
+          mountPath: "/mnt"
+      volumes:
+      - name: langflow-data
+        persistentVolumeClaim:
+          claimName: langflow-data-pvc
+      - name: langflow-mount-dir
+        emptyDir: {}

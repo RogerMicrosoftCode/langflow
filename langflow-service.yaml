@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: langflow
+spec:
+  selector:
+    app: langflow
+  ports:
+  - name: http  # Añadir un nombre al puerto para mejor identificación
+    port: 7860
+    targetPort: 7860
+  type: ClusterIP
